@@ -134,7 +134,7 @@ function getWarehouseLocations(warehouses: Warehouse[], selectedWarehouse: strin
 
 export function InventoryApp() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [profileName, setProfileName] = useState("Inventory Manager");
   const [activeView, setActiveView] = useState<NavigationKey>("Dashboard");
 
@@ -640,7 +640,7 @@ export function InventoryApp() {
 
   return (
     <div className="min-h-screen bg-zinc-100">
-      <div className="mx-auto flex min-h-screen max-w-[1440px]">
+      <div className="mx-auto flex min-h-screen max-w-360">
         <Sidebar activeView={activeView} onNavigate={setActiveView} onLogout={handleLogout} profileName={profileName} />
 
         <main className="flex-1 p-6">
@@ -744,7 +744,7 @@ export function InventoryApp() {
 
               <SectionCard title="Operations Snapshot">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[700px] text-left text-sm">
+                  <table className="w-full min-w-175 text-left text-sm">
                     <thead className="border-b border-zinc-200 text-zinc-500">
                       <tr>
                         <th className="py-2">Ref</th>
@@ -890,7 +890,7 @@ export function InventoryApp() {
                   />
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-left text-sm">
+                  <table className="w-full min-w-190 text-left text-sm">
                     <thead className="border-b border-zinc-200 text-zinc-500">
                       <tr>
                         <th className="py-2">Name</th>
@@ -1068,7 +1068,7 @@ export function InventoryApp() {
                 <section className="xl:col-span-2 rounded-xl border border-zinc-200 bg-white p-4">
                   <h2 className="text-sm font-semibold text-zinc-900">Pending and Completed {activeOperationType}</h2>
                   <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-left text-sm">
+                    <table className="w-full min-w-190 text-left text-sm">
                       <thead className="border-b border-zinc-200 text-zinc-500">
                         <tr>
                           <th className="py-2">Reference</th>
@@ -1118,7 +1118,7 @@ export function InventoryApp() {
           {activeView === "Move History" && (
             <SectionCard title="Stock Ledger">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
+                <table className="w-full min-w-190 text-left text-sm">
                   <thead className="border-b border-zinc-200 text-zinc-500">
                     <tr>
                       <th className="py-2">Timestamp</th>

@@ -42,9 +42,9 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-green-50 to-emerald-100 p-4">
       <div className="w-full max-w-md rounded-lg bg-white shadow-lg">
-        <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-8">
+        <div className="bg-linear-to-r from-green-600 to-emerald-600 px-6 py-8">
           <h1 className="text-2xl font-bold text-white">Create Account</h1>
           <p className="mt-2 text-green-100">Join our inventory management system</p>
         </div>
@@ -128,7 +128,7 @@ export default function SignupPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 py-2 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="w-full rounded-lg bg-linear-to-r from-green-600 to-emerald-600 py-2 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {isLoading ? "Creating Account..." : "Sign Up"}
           </button>

@@ -9,10 +9,9 @@ const {
  */
 const getAllAdjustmentsController = async (req, res) => {
   try {
-    const { warehouseId, page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status } = req.query;
 
     const result = await getAllAdjustments({
-      warehouseId,
       status,
       page: parseInt(page),
       limit: parseInt(limit),
@@ -34,15 +33,15 @@ const getAllAdjustmentsController = async (req, res) => {
  */
 const createAdjustmentController = async (req, res) => {
   try {
-    const { warehouseId, lines } = req.body;
+    const { lines, reason } = req.body;
 
-    if (!warehouseId || !lines || lines.length === 0) {
-      return res.status(400).json({ error: "warehouseId and lines are required" });
+    if (!lines || lines.length === 0) {
+      return res.status(400).json({ error: "lines array is required" });
     }
 
     const result = await createAdjustment({
-      warehouseId,
       lines,
+      reason,
     });
 
     if (!result.success) {
@@ -57,21 +56,15 @@ const createAdjustmentController = async (req, res) => {
 };
 
 /**
- * VALIDATE ADJUSTMENT - Apply correction move (Manager only)
+ * VALIDATE ADJUSTMENT
  */
 const validateAdjustmentController = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const userRole = req.user.role;
 
     if (!id) {
       return res.status(400).json({ error: "Adjustment ID is required" });
-    }
-
-    // Check if user is Manager
-    if (userRole !== "MANAGER") {
-      return res.status(403).json({ error: "Only MANAGER can validate adjustments" });
     }
 
     const result = await validateAdjustment(id, userId);

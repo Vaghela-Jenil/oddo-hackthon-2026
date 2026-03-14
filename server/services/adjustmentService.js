@@ -106,11 +106,10 @@ const validateAdjustment = async (adjustmentId, userId) => {
  */
 const getAllAdjustments = async (filters) => {
   try {
-    const { warehouseId, page = 1, limit = 20, status } = filters;
+    const { page = 1, limit = 20, status } = filters;
     const skip = (page - 1) * limit;
 
     const where = {};
-    if (warehouseId) where.warehouseId = warehouseId;
     if (status) where.status = status;
 
     const adjustments = await prisma.adjustment.findMany({
@@ -118,7 +117,6 @@ const getAllAdjustments = async (filters) => {
       skip,
       take: limit,
       include: {
-        warehouse: true,
         lines: {
           include: {
             product: true,
@@ -152,32 +150,23 @@ const getAllAdjustments = async (filters) => {
  */
 const createAdjustment = async (adjustmentData) => {
   try {
-    const { warehouseId, lines } = adjustmentData;
-
-    // Verify warehouse exists
-    const warehouse = await prisma.warehouse.findUnique({
-      where: { id: warehouseId },
-    });
-
-    if (!warehouse) {
-      return { success: false, error: "Warehouse not found" };
-    }
+    const { lines, reason } = adjustmentData;
 
     // Create adjustment with lines
     const adjustment = await prisma.adjustment.create({
       data: {
-        warehouseId,
+        reason: reason || "",
         status: "DRAFT",
         lines: {
           create: lines.map(line => ({
             productId: line.productId,
             locationId: line.locationId,
-            quantity: parseFloat(line.quantity),
+            adjustedQty: parseFloat(line.adjustedQty || line.quantity || 0),
+            reason: line.reason || "",
           })),
         },
       },
       include: {
-        warehouse: true,
         lines: {
           include: {
             product: true,

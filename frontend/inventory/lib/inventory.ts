@@ -19,35 +19,25 @@ export function getCategories(products: Product[]): string[] {
 }
 
 export function matchesFilters(entry: LedgerEntry, filters: DashboardFilters): boolean {
-  if (filters.type !== "All" && entry.type !== filters.type) {
-    return false;
-  }
-
-  if (filters.status !== "All" && entry.status !== filters.status) {
-    return false;
-  }
-
-  if (filters.warehouse !== "All" && entry.warehouse !== filters.warehouse) {
-    return false;
-  }
-
-  if (filters.category !== "All" && entry.category !== filters.category) {
-    return false;
-  }
-
+  if (filters.type !== "All" && entry.type !== filters.type) return false;
+  if (filters.status !== "All" && entry.status !== filters.status) return false;
+  if (filters.warehouse !== "All" && entry.warehouse !== filters.warehouse) return false;
+  if (filters.category !== "All" && entry.category !== filters.category) return false;
   return true;
 }
 
 export function buildKpis(products: Product[], ledger: LedgerEntry[]): DashboardKpis {
-  const totalProductsInStock = products.reduce((total, product) => total + getTotalStock(product), 0);
+  const totalProductsInStock = products.reduce((total, p) => total + getTotalStock(p), 0);
 
-  const outOfStockItems = products.filter((product) => getTotalStock(product) === 0).length;
-  const lowStockItems = products.filter((product) => {
-    const totalStock = getTotalStock(product);
-    return totalStock > 0 && totalStock <= product.reorderPoint;
+  const outOfStockItems = products.filter((p) => getTotalStock(p) === 0).length;
+  const lowStockItems = products.filter((p) => {
+    const totalStock = getTotalStock(p);
+    return totalStock > 0 && totalStock <= p.reorderPoint;
   }).length;
 
-  const isPending = (status: LedgerEntry["status"]) => status === "Draft" || status === "Waiting" || status === "Ready";
+  // Use a Set for faster lookup if list of statuses grows
+  const isPending = (status: LedgerEntry["status"]) => 
+    ["Draft", "Waiting", "Ready"].includes(status);
 
   const countPendingByType = (type: OperationType) =>
     ledger.filter((entry) => entry.type === type && isPending(entry.status)).length;
@@ -64,36 +54,35 @@ export function buildKpis(products: Product[], ledger: LedgerEntry[]): Dashboard
 
 export function applyValidatedLedgerEntry(products: Product[], entry: LedgerEntry): Product[] {
   return products.map((product) => {
-    if (product.id !== entry.productId) {
-      return product;
-    }
+    if (product.id !== entry.productId) return product;
 
+    // Create a deep copy of stock location map to maintain immutability
     const nextStock = { ...product.stockByLocation };
 
-    if (entry.type === "Receipts") {
-      const key = getLocationKey(entry.warehouse, entry.location);
-      nextStock[key] = (nextStock[key] ?? 0) + entry.quantity;
-    }
+    const updateStock = (warehouse: string, location: string, delta: number) => {
+      const key = getLocationKey(warehouse, location);
+      nextStock[key] = Math.max(0, (nextStock[key] ?? 0) + delta);
+    };
 
-    if (entry.type === "Delivery") {
-      const key = getLocationKey(entry.warehouse, entry.location);
-      nextStock[key] = Math.max(0, (nextStock[key] ?? 0) - entry.quantity);
-    }
+    switch (entry.type) {
+      case "Receipts":
+        updateStock(entry.warehouse, entry.location, entry.quantity);
+        break;
 
-    if (entry.type === "Adjustments") {
-      const key = getLocationKey(entry.warehouse, entry.location);
-      nextStock[key] = Math.max(0, (nextStock[key] ?? 0) + entry.quantity);
-    }
+      case "Delivery":
+        updateStock(entry.warehouse, entry.location, -entry.quantity);
+        break;
 
-    if (entry.type === "Internal") {
-      const fromLocation = entry.fromLocation ?? entry.location;
-      const toLocation = entry.toLocation ?? entry.location;
+      case "Adjustments":
+        updateStock(entry.warehouse, entry.location, entry.quantity);
+        break;
 
-      const fromKey = getLocationKey(entry.warehouse, fromLocation);
-      const toKey = getLocationKey(entry.warehouse, toLocation);
-
-      nextStock[fromKey] = Math.max(0, (nextStock[fromKey] ?? 0) - entry.quantity);
-      nextStock[toKey] = (nextStock[toKey] ?? 0) + entry.quantity;
+      case "Internal":
+        const from = entry.fromLocation ?? entry.location;
+        const to = entry.toLocation ?? entry.location;
+        updateStock(entry.warehouse, from, -entry.quantity);
+        updateStock(entry.warehouse, to, entry.quantity);
+        break;
     }
 
     return {

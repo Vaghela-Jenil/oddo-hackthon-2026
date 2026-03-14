@@ -5,7 +5,7 @@ const {
   updateProductController,
   getProductStockController,
 } = require("../controllers/productController");
-const { authMiddleware, authorize } = require("../middleware/authMiddleware");
+const { authMiddleware } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -20,13 +20,13 @@ router.get("/", authMiddleware, getAllProductsController);
 router.get("/:id/stock", authMiddleware, getProductStockController);
 
 /**
- * PROTECTED ROUTES (Manager only)
+ * PROTECTED ROUTES (with JWT)
  */
 
 // POST /api/products - Create product
-router.post("/", authMiddleware, authorize("MANAGER"), createProductController);
+router.post("/", authMiddleware, createProductController);
 
 // PUT /api/products/:id - Update product
-router.put("/:id", authMiddleware, authorize("MANAGER"), updateProductController);
+router.put("/:id", authMiddleware, updateProductController);
 
 module.exports = router;
