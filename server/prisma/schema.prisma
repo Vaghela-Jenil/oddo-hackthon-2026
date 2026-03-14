@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+
 }
 
 enum Role {
@@ -34,6 +34,8 @@ model User {
   email        String      @unique
   passwordHash String
   role         Role        @default(STAFF)
+  isActive     Boolean     @default(true)
+  lastLogin    DateTime?
   resetOtp     String?
   otpExpiry    DateTime?
   createdAt    DateTime    @default(now())
@@ -52,19 +54,19 @@ model Warehouse {
 }
 
 model Location {
-  id             String         @id @default(uuid())
-  name           String
-  type           String?
-  warehouseId    String
-  warehouse      Warehouse      @relation(fields: [warehouseId], references: [id])
-  stockBalances  StockBalance[]
-  movesFrom      StockMove[]    @relation("MoveFrom")
-  movesTo        StockMove[]    @relation("MoveTo")
-  transfersFrom  Transfer[]     @relation("TxFrom")
-  transfersTo    Transfer[]     @relation("TxTo")
-  adjustments    Adjustment[]
-  receiptLines   ReceiptLine[]
-  deliveryLines  DeliveryLine[]
+  id               String            @id @default(uuid())
+  name             String
+  type             String?
+  warehouseId      String
+  warehouse        Warehouse         @relation(fields: [warehouseId], references: [id])
+  stockBalances    StockBalance[]
+  movesFrom        StockMove[]       @relation("MoveFrom")
+  movesTo          StockMove[]       @relation("MoveTo")
+  transfersFrom    Transfer[]        @relation("TxFrom")
+  transfersTo      Transfer[]        @relation("TxTo")
+  adjustmentLines  AdjustmentLine[]
+  receiptLines     ReceiptLine[]
+  deliveryLines    DeliveryLine[]
 }
 
 // ── Product ───────────────────────────────────────────
@@ -192,14 +194,15 @@ model DeliveryOrder {
 }
 
 model DeliveryLine {
-  id         String        @id @default(uuid())
-  deliveryId String
-  delivery   DeliveryOrder @relation(fields: [deliveryId], references: [id])
-  productId  String
-  product    Product       @relation(fields: [productId], references: [id])
-  locationId String
-  location   Location      @relation(fields: [locationId], references: [id])
-  qty        Decimal
+  id           String        @id @default(uuid())
+  deliveryId   String
+  delivery     DeliveryOrder @relation(fields: [deliveryId], references: [id])
+  productId    String
+  product      Product       @relation(fields: [productId], references: [id])
+  locationId   String
+  location     Location      @relation(fields: [locationId], references: [id])
+  requestedQty Decimal       @default(0)
+  deliveredQty Decimal       @default(0)
 }
 
 // ── Transfers ─────────────────────────────────────────
@@ -229,14 +232,12 @@ model TransferLine {
 
 // ── Adjustments ───────────────────────────────────────
 model Adjustment {
-  id         String           @id @default(uuid())
-  refNo      String           @unique @default(cuid())
-  locationId String
-  location   Location         @relation(fields: [locationId], references: [id])
-  status     OpStatus         @default(DRAFT)
-  reason     String?
-  lines      AdjustmentLine[]
-  createdAt  DateTime         @default(now())
+  id        String           @id @default(uuid())
+  refNo     String           @unique @default(cuid())
+  status    OpStatus         @default(DRAFT)
+  reason    String?
+  lines     AdjustmentLine[]
+  createdAt DateTime         @default(now())
 
   @@index([status])
 }
@@ -247,7 +248,8 @@ model AdjustmentLine {
   adjustment   Adjustment @relation(fields: [adjustmentId], references: [id])
   productId    String
   product      Product    @relation(fields: [productId], references: [id])
-  systemQty    Decimal
-  countedQty   Decimal
-  difference   Decimal
+  locationId   String
+  location     Location   @relation(fields: [locationId], references: [id])
+  adjustedQty  Decimal
+  reason       String?
 }

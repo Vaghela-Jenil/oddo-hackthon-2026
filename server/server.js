@@ -1,6 +1,13 @@
 const express = require("express");
 const prisma = require("./config/prisma");
 const authRoutes = require("./routes/authRoutes");
+const productRoutes = require("./routes/productRoutes");
+const receiptRoutes = require("./routes/receiptRoutes");
+const deliveryRoutes = require("./routes/deliveryRoutes");
+const transferRoutes = require("./routes/transferRoutes");
+const adjustmentRoutes = require("./routes/adjustmentRoutes");
+const stockMoveRoutes = require("./routes/stockMoveRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
 const { authMiddleware } = require("./middleware/authMiddleware");
 require("dotenv").config();
 
@@ -18,8 +25,21 @@ app.get("/", async (req, res) => {
   }
 });
 
+// ═══════════════════════════════
+// ✅ API ROUTES
+// ═══════════════════════════════
+
 // Auth routes (public + protected)
 app.use("/api/auth", authRoutes);
+
+// Inventory routes (all protected with JWT)
+app.use("/api/products", productRoutes);
+app.use("/api/receipts", receiptRoutes);
+app.use("/api/deliveries", deliveryRoutes);
+app.use("/api/transfers", transferRoutes);
+app.use("/api/adjustments", adjustmentRoutes);
+app.use("/api/stock/moves", stockMoveRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 // Example protected route
 app.get("/api/protected", authMiddleware, (req, res) => {
