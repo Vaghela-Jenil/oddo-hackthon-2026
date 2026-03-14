@@ -155,7 +155,8 @@ const getProductStock = async (productId) => {
  */
 const updateProduct = async (productId, updateData) => {
   try {
-    const { name, sku, categoryId, unitOfMeasure, lowStockQty } = updateData;
+    const { name, sku, unitOfMeasure, lowStockQty } = updateData;
+    let { categoryId } = updateData;
 
     const product = await prisma.product.findUnique({
       where: { id: productId },

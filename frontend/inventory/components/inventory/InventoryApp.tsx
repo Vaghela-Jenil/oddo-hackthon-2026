@@ -132,9 +132,25 @@ function getWarehouseLocations(warehouses: Warehouse[], selectedWarehouse: strin
   return warehouses.find((warehouse) => warehouse.name === selectedWarehouse)?.locations ?? [];
 }
 
+function normalizeStatus(status: string): LedgerEntry["status"] {
+  const map: Record<string, LedgerEntry["status"]> = {
+    DRAFT: "Draft",
+    WAITING: "Waiting",
+    READY: "Ready",
+    DONE: "Done",
+    CANCELED: "Canceled",
+    Draft: "Draft",
+    Waiting: "Waiting",
+    Ready: "Ready",
+    Done: "Done",
+    Canceled: "Canceled",
+  };
+  return map[status] || "Draft";
+}
+
 export function InventoryApp() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [profileName, setProfileName] = useState("Inventory Manager");
   const [activeView, setActiveView] = useState<NavigationKey>("Dashboard");
 
@@ -179,6 +195,20 @@ export function InventoryApp() {
   const activeOperationType = operationTitle(activeView);
   const operationLocations = getWarehouseLocations(warehouses, operationForm.warehouse);
 
+  useEffect(() => {
+    const token = api.getToken();
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+
+    setIsAuthenticated(true);
+    const user = api.getUser() as { name?: string } | null;
+    if (user?.name) {
+      setProfileName(user.name);
+    }
+  }, [router]);
+
   // Load data from API
   useEffect(() => {
     const loadData = async () => {
@@ -190,7 +220,7 @@ export function InventoryApp() {
       try {
         // Fetch products and stock information
         const productsResponse = (await api.getProducts(1, 1000)) as any;
-        const products = productsResponse.data || productsResponse.products || [];
+        const products = productsResponse.data || [];
         
         const productsWithStock = await Promise.all(
           products.map(async (product: any) => {
@@ -201,7 +231,11 @@ export function InventoryApp() {
                 category: typeof product.category === 'object' && product.category?.name 
                   ? product.category.name 
                   : (typeof product.category === 'string' ? product.category : 'Uncategorized'),
-                stockByLocation: stockResponse.data?.stockByLocation || {},
+                stockByLocation: (stockResponse.stockByLocation || []).reduce((acc: Record<string, number>, balance: any) => {
+                  const key = `${balance.location?.warehouse?.name || "Main Warehouse"}::${balance.location?.name || "General"}`;
+                  acc[key] = parseFloat(balance.quantity || 0);
+                  return acc;
+                }, {}),
               };
             } catch {
               // If stock fetch fails, just return product without stock
@@ -218,86 +252,92 @@ export function InventoryApp() {
         setProducts(productsWithStock);
 
         // Fetch ledger entries (receipts + deliveries + transfers + adjustments)
-        const [receipts, deliveries, transfers, adjustments, stockMoves] = await Promise.all([
+        const [receipts, deliveries, transfers, adjustments] = await Promise.all([
           api.getReceipts("", ""),
           api.getDeliveries("", ""),
           api.getTransfers(1, 1000),
           api.getAdjustments(1, 1000),
-          api.getStockMoves("", "", "", "", "", 1, 1000),
         ]);
 
-        // Extract data arrays from responses
-        const receiptsData = ((receipts as any).data || (receipts as any).receipts || []) as any[];
-        const deliveriesData = ((deliveries as any).data || (deliveries as any).deliveries || []) as any[];
-        const transfersData = ((transfers as any).data || (transfers as any).transfers || []) as any[];
-        const adjustmentsData = ((adjustments as any).data || (adjustments as any).adjustments || []) as any[];
+        const receiptsData = (receipts as any[]) || [];
+        const deliveriesData = (deliveries as any[]) || [];
+        const transfersData = (transfers as any[]) || [];
+        const adjustmentsData = (adjustments as any[]) || [];
 
         // Combine all ledger entries and convert to LedgerEntry format
         const allEntries: LedgerEntry[] = [
-          ...receiptsData.map((r: any) => ({
-            id: r.id,
+          ...receiptsData.flatMap((r: any) => (r.lines || []).map((line: any) => ({
+            id: `${r.id}-${line.id}`,
             type: "Receipts" as OperationType,
-            status: r.status,
-            reference: r.referenceNumber || "RCPT-" + r.id.slice(0, 4),
-            productId: r.productId,
-            productName: r.productName || "Unknown",
-            category: r.category || "Uncategorized",
-            warehouse: r.warehouse || "Main Warehouse",
-            location: r.location || "General",
-            quantity: r.quantity,
+            status: normalizeStatus(r.status),
+            reference: r.referenceNumber || `RCPT-${r.id.slice(0, 8)}`,
+            productId: line.productId,
+            productName: line.product?.name || "Unknown",
+            category: line.product?.category?.name || "Uncategorized",
+            warehouse: r.warehouse?.name || "Main Warehouse",
+            location: line.location?.name || "General",
+            quantity: parseFloat(line.receivedQty || line.expectedQty || 0),
             timestamp: r.createdAt,
             notes: r.notes || "",
-          })),
-          ...deliveriesData.map((d: any) => ({
-            id: d.id,
+          }))),
+          ...deliveriesData.flatMap((d: any) => (d.lines || []).map((line: any) => ({
+            id: `${d.id}-${line.id}`,
             type: "Delivery" as OperationType,
-            status: d.status,
-            reference: d.referenceNumber || "DLV-" + d.id.slice(0, 4),
-            productId: d.productId,
-            productName: d.productName || "Unknown",
-            category: d.category || "Uncategorized",
-            warehouse: d.warehouse || "Main Warehouse",
-            location: d.location || "General",
-            quantity: d.quantity,
+            status: normalizeStatus(d.status),
+            reference: d.referenceNumber || `DLV-${d.id.slice(0, 8)}`,
+            productId: line.productId,
+            productName: line.product?.name || "Unknown",
+            category: line.product?.category?.name || "Uncategorized",
+            warehouse: d.warehouse?.name || "Main Warehouse",
+            location: line.location?.name || "General",
+            quantity: parseFloat(line.shippedQty || line.requestedQty || 0),
             timestamp: d.createdAt,
             notes: d.notes || "",
-          })),
-          ...transfersData.map((t: any) => ({
-            id: t.id,
+          }))),
+          ...transfersData.flatMap((t: any) => (t.lines || []).map((line: any) => ({
+            id: `${t.id}-${line.id}`,
             type: "Internal" as OperationType,
-            status: t.status,
-            reference: t.referenceNumber || "INT-" + t.id.slice(0, 4),
-            productId: t.productId,
-            productName: t.productName || "Unknown",
-            category: t.category || "Uncategorized",
-            warehouse: t.warehouse || "Main Warehouse",
-            location: t.toLocation || "General",
-            fromLocation: t.fromLocation,
-            toLocation: t.toLocation,
-            quantity: t.quantity,
+            status: normalizeStatus(t.status),
+            reference: t.referenceNumber || `INT-${t.id.slice(0, 8)}`,
+            productId: line.productId,
+            productName: line.product?.name || "Unknown",
+            category: line.product?.category?.name || "Uncategorized",
+            warehouse: t.fromLocation?.warehouse?.name || "Main Warehouse",
+            location: t.toLocation?.name || "General",
+            fromLocation: t.fromLocation?.name,
+            toLocation: t.toLocation?.name,
+            quantity: parseFloat(line.transferQty || line.qty || 0),
             timestamp: t.createdAt,
             notes: t.notes || "",
-          })),
-          ...adjustmentsData.map((a: any) => ({
-            id: a.id,
+          }))),
+          ...adjustmentsData.flatMap((a: any) => (a.lines || []).map((line: any) => ({
+            id: `${a.id}-${line.id}`,
             type: "Adjustments" as OperationType,
-            status: a.status,
-            reference: a.referenceNumber || "ADJ-" + a.id.slice(0, 4),
-            productId: a.productId,
-            productName: a.productName || "Unknown",
-            category: a.category || "Uncategorized",
-            warehouse: a.warehouse || "Main Warehouse",
-            location: a.location || "General",
-            quantity: a.quantity,
+            status: normalizeStatus(a.status),
+            reference: a.referenceNumber || `ADJ-${a.id.slice(0, 8)}`,
+            productId: line.productId,
+            productName: line.product?.name || "Unknown",
+            category: line.product?.category?.name || "Uncategorized",
+            warehouse: line.location?.warehouse?.name || "Main Warehouse",
+            location: line.location?.name || "General",
+            quantity: parseFloat(line.adjustedQty || 0),
             timestamp: a.createdAt,
-            notes: a.notes || "",
-          })),
+            notes: a.reason || "",
+          }))),
         ];
 
         setLedger(allEntries);
 
-        // For now, keep warehouses in state (could be fetched from API if implemented)
-        if (warehouses.length === 0) {
+        const warehousesFromApi = (await api.getWarehouses()) as any[];
+        if (warehousesFromApi.length > 0) {
+          const mappedWarehouses: Warehouse[] = warehousesFromApi.map((warehouse) => ({
+            id: warehouse.id,
+            name: warehouse.name,
+            locations: (warehouse.locations || []).map((location: any) => location.name || location),
+          }));
+          setWarehouses(mappedWarehouses);
+          setLocationWarehouseInput(mappedWarehouses[0]?.name || "Main Warehouse");
+        } else {
           setWarehouses([
             { id: "w-1", name: "Main Warehouse", locations: ["General", "Rack A", "Rack B", "Storage"] },
           ]);
@@ -523,13 +563,11 @@ export function InventoryApp() {
       const entry: LedgerEntry = {
         id: newEntry.id,
         type: newEntry.type,
-        status: newEntry.status || "Draft",
+        status: normalizeStatus(newEntry.status || "DRAFT"),
         reference: newEntry.referenceNumber || `${newEntry.type}-${Date.now()}`,
         productId: selectedProduct.id,
         productName: selectedProduct.name,
-        category: typeof selectedProduct.category === 'object' && selectedProduct.category?.name 
-          ? selectedProduct.category.name 
-          : (typeof selectedProduct.category === 'string' ? selectedProduct.category : 'Uncategorized'),
+        category: selectedProduct.category,
         warehouse: operationForm.warehouse,
         location: activeOperationType === "Internal" ? operationForm.toLocation : operationForm.location,
         quantity: operationForm.quantity,
