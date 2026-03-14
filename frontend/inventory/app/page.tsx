@@ -2,6 +2,6 @@
 
 import { InventoryApp } from "@/components/inventory/InventoryApp";
 
-export default function Home() {
+export default function Page() {
   return <InventoryApp />;
 }

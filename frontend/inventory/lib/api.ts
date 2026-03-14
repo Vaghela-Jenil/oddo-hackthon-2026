@@ -149,6 +149,16 @@ export async function getWarehouses() {
   return response.data?.data || [];
 }
 
+export async function createWarehouse(data: { name: string; locations?: string[] }) {
+  const response = await api.post("/warehouses", data);
+  return response.data?.data || response.data;
+}
+
+export async function addLocationToWarehouse(warehouseId: string, data: { name: string }) {
+  const response = await api.post(`/warehouses/${warehouseId}/locations`, data);
+  return response.data?.data || response.data;
+}
+
 /* ================= RECEIPTS ================= */
 
 export async function getReceipts(
