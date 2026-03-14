@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "nventory System",
-  description: "Interactive inventory management frontend with products, operations, dashboard KPIs, and warehouse controls.",
+  title: "CoreInventory | Modular Inventory Management",
+  description: "Real-time inventory management with products, operations, dashboard KPIs, and warehouse controls.",
 };
 
 export default function RootLayout({

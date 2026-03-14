@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { resolveCategoryId } = require("../utils/entityResolver");
 
 /**
  * GET ALL PRODUCTS
@@ -60,13 +61,18 @@ const getAllProducts = async (filters) => {
  */
 const createProduct = async (productData) => {
   try {
-    const { name, sku, categoryId, unitOfMeasure, lowStockQty, imageUrl } = productData;
+    const { name, sku, unitOfMeasure, lowStockQty, imageUrl } = productData;
+    let { categoryId } = productData;
 
-    // Check if category exists
-    const category = await prisma.category.findUnique({
-      where: { id: categoryId },
-    });
+    // Resolve category – accept either a UUID or a plain name string
+    try {
+      categoryId = await resolveCategoryId(categoryId);
+    } catch (e) {
+      return { success: false, error: `Category resolution failed: ${e.message}` };
+    }
 
+    // Verify resolved category exists
+    const category = await prisma.category.findUnique({ where: { id: categoryId } });
     if (!category) {
       return { success: false, error: "Category not found" };
     }
@@ -169,11 +175,14 @@ const updateProduct = async (productId, updateData) => {
       }
     }
 
-    // If categoryId is being updated, verify it exists
+    // Resolve and verify category when provided
     if (categoryId) {
-      const category = await prisma.category.findUnique({
-        where: { id: categoryId },
-      });
+      try {
+        categoryId = await resolveCategoryId(categoryId);
+      } catch (e) {
+        return { success: false, error: `Category resolution failed: ${e.message}` };
+      }
+      const category = await prisma.category.findUnique({ where: { id: categoryId } });
       if (!category) {
         return { success: false, error: "Category not found" };
       }

@@ -114,28 +114,30 @@ export async function getProducts(
 
   const response = await api.get("/products", { params });
 
+  // Backend returns { success, data: Product[], pagination }
   return {
-    data: response.data?.products || [],
-    total: response.data?.total || 0,
+    data: response.data?.data || [],
+    total: response.data?.pagination?.total || 0,
   };
 }
 
 export async function createProduct(data: any) {
   const response = await api.post("/products", data);
-  return response.data;
+  return response.data?.data || response.data;
 }
 
 export async function updateProduct(productId: string, data: any) {
   const response = await api.put(`/products/${productId}`, data);
-  return response.data;
+  return response.data?.data || response.data;
 }
 
 export async function getProductStock(productId: string) {
   const response = await api.get(`/products/${productId}/stock`);
-
+  // Backend returns { success, data: { product, stockByLocation, totalStock } }
+  const inner = response.data?.data || {};
   return {
-    stockByLocation: response.data?.stockByLocation || {},
-    totalStock: response.data?.totalStock || 0,
+    stockByLocation: inner.stockByLocation || [],
+    totalStock: inner.totalStock || 0,
   };
 }
 
@@ -143,8 +145,8 @@ export async function getProductStock(productId: string) {
 
 export async function getWarehouses() {
   const response = await api.get("/warehouses");
-
-  return response.data?.warehouses || [];
+  // Backend returns { success, data: Warehouse[] }
+  return response.data?.data || [];
 }
 
 /* ================= RECEIPTS ================= */
@@ -163,13 +165,13 @@ export async function getReceipts(
   };
 
   const response = await api.get("/receipts", { params });
-
-  return response.data?.receipts || [];
+  // Backend returns { success, data: Receipt[], pagination }
+  return response.data?.data || [];
 }
 
 export async function createReceipt(data: any) {
   const response = await api.post("/receipts", data);
-  return response.data;
+  return response.data?.data || response.data;
 }
 
 export async function validateReceipt(receiptId: string) {
@@ -193,13 +195,13 @@ export async function getDeliveries(
   };
 
   const response = await api.get("/deliveries", { params });
-
-  return response.data?.deliveries || [];
+  // Backend returns { success, data: DeliveryOrder[], pagination }
+  return response.data?.data || [];
 }
 
 export async function createDelivery(data: any) {
   const response = await api.post("/deliveries", data);
-  return response.data;
+  return response.data?.data || response.data;
 }
 
 export async function validateDelivery(deliveryId: string) {
@@ -213,13 +215,13 @@ export async function getTransfers(page = 1, limit = 50) {
   const response = await api.get("/transfers", {
     params: { page, limit },
   });
-
-  return response.data?.transfers || [];
+  // Backend returns { success, data: Transfer[], pagination }
+  return response.data?.data || [];
 }
 
 export async function createTransfer(data: any) {
   const response = await api.post("/transfers", data);
-  return response.data;
+  return response.data?.data || response.data;
 }
 
 export async function validateTransfer(transferId: string) {
@@ -233,17 +235,37 @@ export async function getAdjustments(page = 1, limit = 50) {
   const response = await api.get("/adjustments", {
     params: { page, limit },
   });
-
-  return response.data?.adjustments || [];
+  // Backend returns { success, data: Adjustment[], pagination }
+  return response.data?.data || [];
 }
 
 export async function createAdjustment(data: any) {
   const response = await api.post("/adjustments", data);
-  return response.data;
+  return response.data?.data || response.data;
 }
 
 export async function validateAdjustment(adjustmentId: string) {
   const response = await api.put(`/adjustments/${adjustmentId}/validate`);
+  return response.data;
+}
+
+/* ================= PASSWORD RESET ================= */
+
+export async function requestPasswordReset(email: string) {
+  const response = await api.post("/auth/forgot-password", { email });
+  return response.data;
+}
+
+export async function resetPassword(
+  otp: string,
+  newPassword: string,
+  confirmPassword: string
+) {
+  const response = await api.post("/auth/reset-password", {
+    otp,
+    newPassword,
+    confirmPassword,
+  });
   return response.data;
 }
 
@@ -336,6 +358,8 @@ export async function createSingleProductTransfer(data: {
   return await createTransfer({
     fromLocationId: data.fromLocation,
     toLocationId: data.toLocation,
+    fromWarehouse: data.warehouse,
+    toWarehouse: data.warehouse,
     lines: [
       {
         productId: data.productId,

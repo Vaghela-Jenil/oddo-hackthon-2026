@@ -42,17 +42,18 @@ const getDashboardKPIs = async (warehouseId) => {
 
     const totalStockItems = stockBalances.reduce((sum, balance) => sum + parseFloat(balance.quantity), 0);
 
-    // Low stock alerts
-    const lowStockProducts = await prisma.stockBalance.findMany({
-      where: {
-        quantity: {
-          lt: prisma.product.fields.lowStockQty,
-        },
-      },
-      include: {
-        product: true,
-        location: true,
-      },
+    // Low stock alerts – compare in JS to avoid unsupported cross-field Prisma where clause
+    const allProductsWithStock = await prisma.product.findMany({
+      where: { isActive: true, lowStockQty: { gt: 0 } },
+      include: { stockBalances: true },
+    });
+
+    const lowStockProducts = allProductsWithStock.filter((product) => {
+      const totalQty = product.stockBalances.reduce(
+        (sum, b) => sum + parseFloat(b.quantity),
+        0,
+      );
+      return totalQty < parseFloat(product.lowStockQty);
     });
 
     return {

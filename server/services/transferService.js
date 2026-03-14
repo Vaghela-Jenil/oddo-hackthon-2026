@@ -1,20 +1,41 @@
 const prisma = require("../config/prisma");
+const { resolveWarehouseId, resolveLocationId } = require("../utils/entityResolver");
 
 /**
  * CREATE TRANSFER
  */
 const createTransfer = async (transferData) => {
   try {
-    const { fromLocationId, toLocationId, lines } = transferData;
+    const { lines, fromWarehouse, toWarehouse } = transferData;
+    let { fromLocationId, toLocationId } = transferData;
+
+    // Resolve from-location – accept UUID or name+warehouse
+    try {
+      if (fromWarehouse) {
+        const fromWarehouseId = await resolveWarehouseId(fromWarehouse);
+        fromLocationId = await resolveLocationId(fromLocationId, fromWarehouseId);
+      } else {
+        fromLocationId = await resolveLocationId(fromLocationId, null);
+      }
+    } catch (e) {
+      return { success: false, error: `From-location resolution failed: ${e.message}` };
+    }
+
+    // Resolve to-location
+    try {
+      if (toWarehouse) {
+        const toWarehouseId = await resolveWarehouseId(toWarehouse);
+        toLocationId = await resolveLocationId(toLocationId, toWarehouseId);
+      } else {
+        toLocationId = await resolveLocationId(toLocationId, null);
+      }
+    } catch (e) {
+      return { success: false, error: `To-location resolution failed: ${e.message}` };
+    }
 
     // Verify locations exist
-    const fromLocation = await prisma.location.findUnique({
-      where: { id: fromLocationId },
-    });
-
-    const toLocation = await prisma.location.findUnique({
-      where: { id: toLocationId },
-    });
+    const fromLocation = await prisma.location.findUnique({ where: { id: fromLocationId } });
+    const toLocation = await prisma.location.findUnique({ where: { id: toLocationId } });
 
     if (!fromLocation || !toLocation) {
       return { success: false, error: "One or both locations not found" };

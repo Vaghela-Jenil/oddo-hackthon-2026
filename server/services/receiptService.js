@@ -1,5 +1,5 @@
 const prisma = require("../config/prisma");
-const { v4: cuid } = require("crypto");
+const { resolveWarehouseId, resolveLocationId } = require("../utils/entityResolver");
 
 /**
  * GET ALL RECEIPTS
@@ -52,15 +52,29 @@ const getAllReceipts = async (filters) => {
  */
 const createReceipt = async (receiptData) => {
   try {
-    const { supplierId, warehouseId, scheduledDate, lines } = receiptData;
+    const { supplierId, scheduledDate, lines } = receiptData;
+    let { warehouseId } = receiptData;
 
-    // Verify warehouse exists
-    const warehouse = await prisma.warehouse.findUnique({
-      where: { id: warehouseId },
-    });
+    // Resolve warehouse – accept UUID or name
+    try {
+      warehouseId = await resolveWarehouseId(warehouseId);
+    } catch (e) {
+      return { success: false, error: `Warehouse resolution failed: ${e.message}` };
+    }
 
-    if (!warehouse) {
-      return { success: false, error: "Warehouse not found" };
+    // Resolve each line’s locationId from name if necessary
+    let resolvedLines;
+    try {
+      resolvedLines = await Promise.all(
+        lines.map(async (line) => ({
+          productId: line.productId,
+          locationId: await resolveLocationId(line.locationId, warehouseId),
+          expectedQty: parseFloat(line.expectedQty),
+          receivedQty: 0,
+        })),
+      );
+    } catch (e) {
+      return { success: false, error: `Location resolution failed: ${e.message}` };
     }
 
     // Create receipt with lines
@@ -70,12 +84,7 @@ const createReceipt = async (receiptData) => {
         warehouseId,
         scheduledDate: scheduledDate ? new Date(scheduledDate) : null,
         lines: {
-          create: lines.map(line => ({
-            productId: line.productId,
-            locationId: line.locationId,
-            expectedQty: parseFloat(line.expectedQty),
-            receivedQty: 0,
-          })),
+          create: resolvedLines,
         },
       },
       include: {

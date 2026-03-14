@@ -33,10 +33,26 @@ const getAllAdjustmentsController = async (req, res) => {
  */
 const createAdjustmentController = async (req, res) => {
   try {
-    const { lines, reason } = req.body;
+    let { lines, reason, productId, quantity, warehouse, location, notes } = req.body;
+
+    // Normalize flat format sent by the frontend UI into the expected lines array
+    if (!lines && productId) {
+      lines = [
+        {
+          productId,
+          locationId: location,
+          warehouseName: warehouse,
+          adjustedQty: parseFloat(quantity) || 0,
+          reason: notes || "",
+        },
+      ];
+      reason = notes || "";
+    }
 
     if (!lines || lines.length === 0) {
-      return res.status(400).json({ error: "lines array is required" });
+      return res.status(400).json({
+        error: "lines array (or productId + quantity + location) is required",
+      });
     }
 
     const result = await createAdjustment({

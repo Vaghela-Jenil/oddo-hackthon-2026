@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { resolveWarehouseId, resolveLocationId } = require("../utils/entityResolver");
 
 /**
  * VALIDATE ADJUSTMENT - Create correction moves
@@ -150,20 +151,39 @@ const getAllAdjustments = async (filters) => {
  */
 const createAdjustment = async (adjustmentData) => {
   try {
-    const { lines, reason } = adjustmentData;
+    const { reason } = adjustmentData;
+    let { lines } = adjustmentData;
 
-    // Create adjustment with lines
+    // Resolve locationId for each line (accepts name or UUID)
+    try {
+      lines = await Promise.all(
+        lines.map(async (line) => {
+          let resolvedLocationId = line.locationId;
+          if (line.warehouseName) {
+            const warehouseId = await resolveWarehouseId(line.warehouseName);
+            resolvedLocationId = await resolveLocationId(line.locationId, warehouseId);
+          } else {
+            resolvedLocationId = await resolveLocationId(line.locationId, null);
+          }
+          return {
+            productId: line.productId,
+            locationId: resolvedLocationId,
+            adjustedQty: parseFloat(line.adjustedQty || line.quantity || 0),
+            reason: line.reason || "",
+          };
+        }),
+      );
+    } catch (e) {
+      return { success: false, error: `Location resolution failed: ${e.message}` };
+    }
+
+    // Create adjustment with resolved lines
     const adjustment = await prisma.adjustment.create({
       data: {
         reason: reason || "",
         status: "DRAFT",
         lines: {
-          create: lines.map(line => ({
-            productId: line.productId,
-            locationId: line.locationId,
-            adjustedQty: parseFloat(line.adjustedQty || line.quantity || 0),
-            reason: line.reason || "",
-          })),
+          create: lines,
         },
       },
       include: {

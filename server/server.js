@@ -9,6 +9,7 @@ const transferRoutes = require("./routes/transferRoutes");
 const adjustmentRoutes = require("./routes/adjustmentRoutes");
 const stockMoveRoutes = require("./routes/stockMoveRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
+const warehouseRoutes = require("./routes/warehouseRoutes");
 const { authMiddleware } = require("./middleware/authMiddleware");
 require("dotenv").config();
 
@@ -144,6 +145,7 @@ app.use("/api/transfers", transferRoutes);
 app.use("/api/adjustments", adjustmentRoutes);
 app.use("/api/stock/moves", stockMoveRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/warehouses", warehouseRoutes);
 
 // Example protected route
 app.get("/api/protected", authMiddleware, (req, res) => {

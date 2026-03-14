@@ -33,7 +33,7 @@ const getAllTransfersController = async (req, res) => {
  */
 const createTransferController = async (req, res) => {
   try {
-    const { fromLocationId, toLocationId, lines } = req.body;
+    const { fromLocationId, toLocationId, fromWarehouse, toWarehouse, lines } = req.body;
 
     if (!fromLocationId || !toLocationId || !lines || lines.length === 0) {
       return res.status(400).json({ error: "fromLocationId, toLocationId, and lines are required" });
@@ -42,6 +42,8 @@ const createTransferController = async (req, res) => {
     const result = await createTransfer({
       fromLocationId,
       toLocationId,
+      fromWarehouse,
+      toWarehouse,
       lines,
     });
 

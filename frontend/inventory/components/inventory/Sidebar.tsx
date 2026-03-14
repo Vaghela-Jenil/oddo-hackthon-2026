@@ -62,7 +62,7 @@ export function Sidebar({ activeView, onNavigate, onLogout, profileName }: Sideb
         <p className="text-xs text-zinc-500">Inventory Management System</p>
       </div>
 
-      <nav className="flex-1 space-y-2" aria-label="Main Navigation">
+      <nav className="flex-1 space-y-1" aria-label="Main Navigation">
         {navItems.map((item) => (
           <NavButton key={item} active={activeView === item} onClick={() => onNavigate(item)}>
             {item}

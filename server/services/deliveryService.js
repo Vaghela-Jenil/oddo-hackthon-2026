@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { resolveWarehouseId, resolveLocationId } = require("../utils/entityResolver");
 
 /**
  * GET ALL DELIVERIES
@@ -51,15 +52,29 @@ const getAllDeliveries = async (filters) => {
  */
 const createDelivery = async (deliveryData) => {
   try {
-    const { customerId, warehouseId, scheduledDate, lines } = deliveryData;
+    const { customerId, scheduledDate, lines } = deliveryData;
+    let { warehouseId } = deliveryData;
 
-    // Verify warehouse exists
-    const warehouse = await prisma.warehouse.findUnique({
-      where: { id: warehouseId },
-    });
+    // Resolve warehouse – accept UUID or name
+    try {
+      warehouseId = await resolveWarehouseId(warehouseId);
+    } catch (e) {
+      return { success: false, error: `Warehouse resolution failed: ${e.message}` };
+    }
 
-    if (!warehouse) {
-      return { success: false, error: "Warehouse not found" };
+    // Resolve each line’s locationId from name if necessary
+    let resolvedLines;
+    try {
+      resolvedLines = await Promise.all(
+        lines.map(async (line) => ({
+          productId: line.productId,
+          locationId: await resolveLocationId(line.locationId, warehouseId),
+          requestedQty: parseFloat(line.requestedQty || 0),
+          deliveredQty: parseFloat(line.deliveredQty || 0),
+        })),
+      );
+    } catch (e) {
+      return { success: false, error: `Location resolution failed: ${e.message}` };
     }
 
     // Create delivery with lines
@@ -69,12 +84,7 @@ const createDelivery = async (deliveryData) => {
         warehouseId,
         scheduledDate: scheduledDate ? new Date(scheduledDate) : null,
         lines: {
-          create: lines.map(line => ({
-            productId: line.productId,
-            locationId: line.locationId,
-            requestedQty: parseFloat(line.requestedQty || 0),
-            deliveredQty: parseFloat(line.deliveredQty || 0),
-          })),
+          create: resolvedLines,
         },
       },
       include: {
