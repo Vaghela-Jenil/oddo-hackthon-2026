@@ -101,6 +101,105 @@ const validateAdjustment = async (adjustmentId, userId) => {
   }
 };
 
+/**
+ * GET ALL ADJUSTMENTS
+ */
+const getAllAdjustments = async (filters) => {
+  try {
+    const { warehouseId, page = 1, limit = 20, status } = filters;
+    const skip = (page - 1) * limit;
+
+    const where = {};
+    if (warehouseId) where.warehouseId = warehouseId;
+    if (status) where.status = status;
+
+    const adjustments = await prisma.adjustment.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        warehouse: true,
+        lines: {
+          include: {
+            product: true,
+            location: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const total = await prisma.adjustment.count({ where });
+
+    return {
+      success: true,
+      data: adjustments,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  } catch (error) {
+    console.error("Get adjustments error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * CREATE ADJUSTMENT
+ */
+const createAdjustment = async (adjustmentData) => {
+  try {
+    const { warehouseId, lines } = adjustmentData;
+
+    // Verify warehouse exists
+    const warehouse = await prisma.warehouse.findUnique({
+      where: { id: warehouseId },
+    });
+
+    if (!warehouse) {
+      return { success: false, error: "Warehouse not found" };
+    }
+
+    // Create adjustment with lines
+    const adjustment = await prisma.adjustment.create({
+      data: {
+        warehouseId,
+        status: "DRAFT",
+        lines: {
+          create: lines.map(line => ({
+            productId: line.productId,
+            locationId: line.locationId,
+            quantity: parseFloat(line.quantity),
+          })),
+        },
+      },
+      include: {
+        warehouse: true,
+        lines: {
+          include: {
+            product: true,
+            location: true,
+          },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: "Adjustment created successfully",
+      data: adjustment,
+    };
+  } catch (error) {
+    console.error("Create adjustment error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   validateAdjustment,
+  createAdjustment,
+  getAllAdjustments,
 };

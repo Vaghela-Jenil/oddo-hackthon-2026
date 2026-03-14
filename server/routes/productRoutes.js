@@ -2,6 +2,7 @@ const express = require("express");
 const {
   getAllProductsController,
   createProductController,
+  updateProductController,
   getProductStockController,
 } = require("../controllers/productController");
 const { authMiddleware, authorize } = require("../middleware/authMiddleware");
@@ -24,5 +25,8 @@ router.get("/:id/stock", authMiddleware, getProductStockController);
 
 // POST /api/products - Create product
 router.post("/", authMiddleware, authorize("MANAGER"), createProductController);
+
+// PUT /api/products/:id - Update product
+router.put("/:id", authMiddleware, authorize("MANAGER"), updateProductController);
 
 module.exports = router;

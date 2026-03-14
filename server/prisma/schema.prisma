@@ -35,7 +35,6 @@ model User {
   passwordHash String
   role         Role        @default(STAFF)
   isActive     Boolean     @default(true)
-  lastLogin    DateTime?
   resetOtp     String?
   otpExpiry    DateTime?
   createdAt    DateTime    @default(now())

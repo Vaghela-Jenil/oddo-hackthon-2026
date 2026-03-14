@@ -181,7 +181,61 @@ const validateTransfer = async (transferId, userId) => {
   }
 };
 
+/**
+ * GET ALL TRANSFERS
+ */
+const getAllTransfers = async (filters) => {
+  try {
+    const { page = 1, limit = 20, status } = filters;
+    const skip = (page - 1) * limit;
+
+    const where = {};
+    if (status) where.status = status;
+
+    const transfers = await prisma.transfer.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        fromLocation: {
+          include: {
+            warehouse: true,
+          },
+        },
+        toLocation: {
+          include: {
+            warehouse: true,
+          },
+        },
+        lines: {
+          include: {
+            product: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const total = await prisma.transfer.count({ where });
+
+    return {
+      success: true,
+      data: transfers,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  } catch (error) {
+    console.error("Get transfers error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   createTransfer,
   validateTransfer,
+  getAllTransfers,
 };

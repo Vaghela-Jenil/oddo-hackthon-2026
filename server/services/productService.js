@@ -144,8 +144,68 @@ const getProductStock = async (productId) => {
   }
 };
 
+/**
+ * UPDATE PRODUCT
+ */
+const updateProduct = async (productId, updateData) => {
+  try {
+    const { name, sku, categoryId, unitOfMeasure, lowStockQty } = updateData;
+
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+    });
+
+    if (!product) {
+      return { success: false, error: "Product not found" };
+    }
+
+    // If SKU is being updated, check for duplicates
+    if (sku && sku !== product.sku) {
+      const existingSku = await prisma.product.findUnique({
+        where: { sku },
+      });
+      if (existingSku) {
+        return { success: false, error: "SKU already exists" };
+      }
+    }
+
+    // If categoryId is being updated, verify it exists
+    if (categoryId) {
+      const category = await prisma.category.findUnique({
+        where: { id: categoryId },
+      });
+      if (!category) {
+        return { success: false, error: "Category not found" };
+      }
+    }
+
+    const updatePayload = {};
+    if (name) updatePayload.name = name;
+    if (sku) updatePayload.sku = sku;
+    if (categoryId) updatePayload.categoryId = categoryId;
+    if (unitOfMeasure) updatePayload.unitOfMeasure = unitOfMeasure;
+    if (lowStockQty !== undefined) updatePayload.lowStockQty = lowStockQty;
+
+    const updatedProduct = await prisma.product.update({
+      where: { id: productId },
+      data: updatePayload,
+      include: { category: true },
+    });
+
+    return {
+      success: true,
+      message: "Product updated successfully",
+      data: updatedProduct,
+    };
+  } catch (error) {
+    console.error("Update product error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   getAllProducts,
   createProduct,
   getProductStock,
+  updateProduct,
 };

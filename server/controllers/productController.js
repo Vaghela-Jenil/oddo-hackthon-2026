@@ -2,6 +2,7 @@ const {
   getAllProducts,
   createProduct,
   getProductStock,
+  updateProduct,
 } = require("../services/productService");
 
 /**
@@ -62,6 +63,37 @@ const createProductController = async (req, res) => {
 };
 
 /**
+ * UPDATE PRODUCT - Update existing product (Manager only)
+ */
+const updateProductController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, sku, categoryId, unitOfMeasure, lowStockQty } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ error: "Product ID is required" });
+    }
+
+    const result = await updateProduct(id, {
+      name,
+      sku,
+      categoryId,
+      unitOfMeasure,
+      lowStockQty: lowStockQty !== undefined ? parseFloat(lowStockQty) : undefined,
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("Update product error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/**
  * GET PRODUCT STOCK - Get stock per location for a product
  */
 const getProductStockController = async (req, res) => {
@@ -88,5 +120,6 @@ const getProductStockController = async (req, res) => {
 module.exports = {
   getAllProductsController,
   createProductController,
+  updateProductController,
   getProductStockController,
 };

@@ -52,9 +52,21 @@ const signup = async (name, email, password) => {
       console.warn("Welcome email failed (non-blocking):", err.message);
     });
 
+    // Generate JWT token for automatic login after signup
+    const payload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET || "default-secret", {
+      expiresIn: process.env.JWT_EXPIRY || "7d",
+    });
+
     return {
       success: true,
       message: "User created successfully",
+      token,
       user: {
         id: user.id,
         name: user.name,
@@ -73,32 +85,47 @@ const signup = async (name, email, password) => {
  */
 const login = async (email, password) => {
   try {
+    console.log("🔍 Login service - checking credentials");
+    
     // Validate inputs
     if (!email || !password) {
+      console.log("❌ Missing email or password");
       return { success: false, error: "Email and password are required" };
     }
 
     // Check JWT_SECRET is configured
     if (!process.env.JWT_SECRET) {
+      console.log("❌ JWT_SECRET not configured");
       return { success: false, error: "Server configuration error: JWT_SECRET not set" };
     }
 
     // Find user by email
+    console.log(`📧 Searching for user with email: ${email}`);
     const user = await prisma.user.findUnique({ where: { email } });
+    
     if (!user) {
+      console.log("❌ User not found");
       return { success: false, error: "Invalid email or password" };
     }
+    
+    console.log(`✅ User found: ${user.name} (${user.email}), isActive: ${user.isActive}`);
 
     // Check if account is active
     if (!user.isActive) {
+      console.log("❌ Account is disabled");
       return { success: false, error: "Account is disabled" };
     }
 
     // Verify password
+    console.log("🔐 Verifying password...");
     const isPasswordValid = await bcryptjs.compare(password, user.passwordHash);
+    
     if (!isPasswordValid) {
+      console.log("❌ Password incorrect");
       return { success: false, error: "Invalid email or password" };
     }
+    
+    console.log("✅ Password verified");
 
     // Generate JWT
     const payload = {
@@ -111,11 +138,7 @@ const login = async (email, password) => {
       expiresIn: process.env.JWT_EXPIRY || "7d",
     });
 
-    // Update last login
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLogin: new Date() },
-    });
+    console.log("✅ Login successful, token generated");
 
     return {
       success: true,

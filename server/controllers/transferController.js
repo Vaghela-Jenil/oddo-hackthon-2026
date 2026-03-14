@@ -1,7 +1,32 @@
 const {
   createTransfer,
   validateTransfer,
+  getAllTransfers,
 } = require("../services/transferService");
+
+/**
+ * GET ALL TRANSFERS
+ */
+const getAllTransfersController = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+
+    const result = await getAllTransfers({
+      status,
+      page: parseInt(page),
+      limit: parseInt(limit),
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("Get transfers error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
 
 /**
  * CREATE TRANSFER
@@ -57,6 +82,7 @@ const validateTransferController = async (req, res) => {
 };
 
 module.exports = {
+  getAllTransfersController,
   createTransferController,
   validateTransferController,
 };

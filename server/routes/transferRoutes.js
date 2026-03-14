@@ -1,5 +1,6 @@
 const express = require("express");
 const {
+  getAllTransfersController,
   createTransferController,
   validateTransferController,
 } = require("../controllers/transferController");
@@ -10,6 +11,9 @@ const router = express.Router();
 /**
  * PROTECTED ROUTES (JWT required)
  */
+
+// GET /api/transfers - List transfers
+router.get("/", authMiddleware, getAllTransfersController);
 
 // POST /api/transfers - Create internal transfer
 router.post("/", authMiddleware, createTransferController);

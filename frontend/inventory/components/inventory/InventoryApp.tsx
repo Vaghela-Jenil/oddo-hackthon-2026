@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AuthPanel } from "@/components/inventory/AuthPanel";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Sidebar, type NavigationKey } from "@/components/inventory/Sidebar";
-import { initialLedger, initialProducts, initialWarehouses } from "@/data/seed";
 import {
   applyValidatedLedgerEntry,
   buildKpis,
@@ -13,6 +12,7 @@ import {
   matchesFilters,
 } from "@/lib/inventory";
 import { isNonNegativeNumber, isPositiveNumber, isValidLabel, isValidSku, sanitizeText } from "@/lib/validators";
+import * as api from "@/lib/api";
 import type { DashboardFilters, LedgerEntry, OperationType, Product, Warehouse } from "@/types/inventory";
 
 interface ProductFormState {
@@ -133,14 +133,19 @@ function getWarehouseLocations(warehouses: Warehouse[], selectedWarehouse: strin
 }
 
 export function InventoryApp() {
+  const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [profileName, setProfileName] = useState("Inventory Manager");
   const [activeView, setActiveView] = useState<NavigationKey>("Dashboard");
 
-  const [products, setProducts] = useState<Product[]>(initialProducts);
-  const [ledger, setLedger] = useState<LedgerEntry[]>(initialLedger);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>(initialWarehouses);
+  // API data states
+  const [products, setProducts] = useState<Product[]>([]);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [dataError, setDataError] = useState<string>("");
 
+  // UI states
   const [filters, setFilters] = useState<DashboardFilters>(DEFAULT_FILTERS);
   const [productSearch, setProductSearch] = useState("");
   const [productForm, setProductForm] = useState<ProductFormState>(DEFAULT_PRODUCT_FORM);
@@ -150,6 +155,7 @@ export function InventoryApp() {
   const [locationWarehouseInput, setLocationWarehouseInput] = useState("Main Warehouse");
   const [locationNameInput, setLocationNameInput] = useState("");
   const [bannerMessage, setBannerMessage] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const categories = useMemo(() => getCategories(products), [products]);
   const kpis = useMemo(() => buildKpis(products, ledger), [products, ledger]);
@@ -173,6 +179,135 @@ export function InventoryApp() {
   const activeOperationType = operationTitle(activeView);
   const operationLocations = getWarehouseLocations(warehouses, operationForm.warehouse);
 
+  // Load data from API
+  useEffect(() => {
+    const loadData = async () => {
+      if (!isAuthenticated) return;
+
+      setIsLoadingData(true);
+      setDataError("");
+
+      try {
+        // Fetch products and stock information
+        const productsResponse = (await api.getProducts(1, 1000)) as any;
+        const products = productsResponse.data || productsResponse.products || [];
+        
+        const productsWithStock = await Promise.all(
+          products.map(async (product: Product) => {
+            try {
+              const stockResponse = (await api.getProductStock(product.id)) as any;
+              return {
+                ...product,
+                stockByLocation: stockResponse.data?.stockByLocation || {},
+              };
+            } catch {
+              // If stock fetch fails, just return product without stock
+              return {
+                ...product,
+                stockByLocation: {},
+              };
+            }
+          }),
+        );
+        setProducts(productsWithStock);
+
+        // Fetch ledger entries (receipts + deliveries + transfers + adjustments)
+        const [receipts, deliveries, transfers, adjustments, stockMoves] = await Promise.all([
+          api.getReceipts("", ""),
+          api.getDeliveries("", ""),
+          api.getTransfers(1, 1000),
+          api.getAdjustments(1, 1000),
+          api.getStockMoves("", "", "", "", "", 1, 1000),
+        ]);
+
+        // Extract data arrays from responses
+        const receiptsData = ((receipts as any).data || (receipts as any).receipts || []) as any[];
+        const deliveriesData = ((deliveries as any).data || (deliveries as any).deliveries || []) as any[];
+        const transfersData = ((transfers as any).data || (transfers as any).transfers || []) as any[];
+        const adjustmentsData = ((adjustments as any).data || (adjustments as any).adjustments || []) as any[];
+
+        // Combine all ledger entries and convert to LedgerEntry format
+        const allEntries: LedgerEntry[] = [
+          ...receiptsData.map((r: any) => ({
+            id: r.id,
+            type: "Receipts" as OperationType,
+            status: r.status,
+            reference: r.referenceNumber || "RCPT-" + r.id.slice(0, 4),
+            productId: r.productId,
+            productName: r.productName || "Unknown",
+            category: r.category || "Uncategorized",
+            warehouse: r.warehouse || "Main Warehouse",
+            location: r.location || "General",
+            quantity: r.quantity,
+            timestamp: r.createdAt,
+            notes: r.notes || "",
+          })),
+          ...deliveriesData.map((d: any) => ({
+            id: d.id,
+            type: "Delivery" as OperationType,
+            status: d.status,
+            reference: d.referenceNumber || "DLV-" + d.id.slice(0, 4),
+            productId: d.productId,
+            productName: d.productName || "Unknown",
+            category: d.category || "Uncategorized",
+            warehouse: d.warehouse || "Main Warehouse",
+            location: d.location || "General",
+            quantity: d.quantity,
+            timestamp: d.createdAt,
+            notes: d.notes || "",
+          })),
+          ...transfersData.map((t: any) => ({
+            id: t.id,
+            type: "Internal" as OperationType,
+            status: t.status,
+            reference: t.referenceNumber || "INT-" + t.id.slice(0, 4),
+            productId: t.productId,
+            productName: t.productName || "Unknown",
+            category: t.category || "Uncategorized",
+            warehouse: t.warehouse || "Main Warehouse",
+            location: t.toLocation || "General",
+            fromLocation: t.fromLocation,
+            toLocation: t.toLocation,
+            quantity: t.quantity,
+            timestamp: t.createdAt,
+            notes: t.notes || "",
+          })),
+          ...adjustmentsData.map((a: any) => ({
+            id: a.id,
+            type: "Adjustments" as OperationType,
+            status: a.status,
+            reference: a.referenceNumber || "ADJ-" + a.id.slice(0, 4),
+            productId: a.productId,
+            productName: a.productName || "Unknown",
+            category: a.category || "Uncategorized",
+            warehouse: a.warehouse || "Main Warehouse",
+            location: a.location || "General",
+            quantity: a.quantity,
+            timestamp: a.createdAt,
+            notes: a.notes || "",
+          })),
+        ];
+
+        setLedger(allEntries);
+
+        // For now, keep warehouses in state (could be fetched from API if implemented)
+        if (warehouses.length === 0) {
+          setWarehouses([
+            { id: "w-1", name: "Main Warehouse", locations: ["General", "Rack A", "Rack B", "Storage"] },
+          ]);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load inventory data";
+        setDataError(message);
+        setBannerMessage(`Error loading data: ${message}`);
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+
+    loadData();
+  }, [isAuthenticated]);
+
   const authenticate = (name: string) => {
     setProfileName(name);
     setIsAuthenticated(true);
@@ -180,12 +315,27 @@ export function InventoryApp() {
     setBannerMessage("Authentication successful. Redirected to Inventory Dashboard.");
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setBannerMessage("You have been logged out.");
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+      api.clearToken();
+      api.removeUser();
+      setIsAuthenticated(false);
+      setBannerMessage("You have been logged out.");
+      setProducts([]);
+      setLedger([]);
+      setActiveView("Dashboard");
+      // Redirect to login page
+      setTimeout(() => router.push("/login"), 500);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Logout failed";
+      setBannerMessage(`Logout error: ${message}`);
+      // Still redirect even if logout fails
+      setTimeout(() => router.push("/login"), 1000);
+    }
   };
 
-  const upsertProduct = () => {
+  const upsertProduct = async () => {
     const normalizedName = sanitizeText(productForm.name);
     const normalizedCategory = sanitizeText(productForm.category);
     const normalizedUnit = sanitizeText(productForm.unit);
@@ -201,51 +351,73 @@ export function InventoryApp() {
       return;
     }
 
-    const locationKey = getLocationKey(productForm.warehouse, productForm.location);
-
-    if (productForm.id) {
-      setProducts((current) =>
-        current.map((product) =>
-          product.id === productForm.id
-            ? {
-                ...product,
-                name: normalizedName,
-                sku: normalizedSku,
-                category: normalizedCategory,
-                unit: normalizedUnit,
-                reorderPoint: productForm.reorderPoint,
-                stockByLocation: {
-                  ...product.stockByLocation,
-                  [locationKey]: (product.stockByLocation[locationKey] ?? 0) + productForm.initialStock,
-                },
-              }
-            : product,
-        ),
-      );
-      setBannerMessage(`Product ${normalizedName} updated.`);
-    } else {
-      setProducts((current) => [
-        {
-          id: `p-${Date.now()}`,
+    setIsSubmitting(true);
+    try {
+      if (productForm.id) {
+        // Update existing product via API
+        await api.updateProduct(productForm.id, {
           name: normalizedName,
           sku: normalizedSku,
           category: normalizedCategory,
           unit: normalizedUnit,
           reorderPoint: productForm.reorderPoint,
-          stockByLocation: {
-            [locationKey]: productForm.initialStock,
-          },
-        },
-        ...current,
-      ]);
-      setBannerMessage(`Product ${normalizedName} created.`);
-    }
+        });
 
-    setProductForm({
-      ...DEFAULT_PRODUCT_FORM,
-      warehouse: productForm.warehouse,
-      location: productForm.location,
-    });
+        // Update local state
+        setProducts((current) =>
+          current.map((product) =>
+            product.id === productForm.id
+              ? {
+                  ...product,
+                  name: normalizedName,
+                  sku: normalizedSku,
+                  category: normalizedCategory,
+                  unit: normalizedUnit,
+                  reorderPoint: productForm.reorderPoint,
+                }
+              : product,
+          ),
+        );
+        setBannerMessage(`Product ${normalizedName} updated.`);
+      } else {
+        // Create new product via API
+        const response = (await api.createProduct({
+          name: normalizedName,
+          sku: normalizedSku,
+          categoryId: normalizedCategory,
+          unitOfMeasure: normalizedUnit,
+          lowStockQty: productForm.reorderPoint,
+        })) as any;
+
+        const newProduct = response.data || response;
+
+        // Add to local state
+        setProducts((current) => [
+          {
+            id: newProduct.id,
+            name: normalizedName,
+            sku: normalizedSku,
+            category: normalizedCategory,
+            unit: normalizedUnit,
+            reorderPoint: productForm.reorderPoint,
+            stockByLocation: {},
+          },
+          ...current,
+        ]);
+        setBannerMessage(`Product ${normalizedName} created.`);
+      }
+
+      setProductForm({
+        ...DEFAULT_PRODUCT_FORM,
+        warehouse: productForm.warehouse,
+        location: productForm.location,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save product";
+      setBannerMessage(`Error: ${message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const selectProductForEdit = (product: Product) => {
@@ -269,7 +441,7 @@ export function InventoryApp() {
     setActiveView("Products");
   };
 
-  const createOperation = () => {
+  const createOperation = async () => {
     if (!activeOperationType) {
       return;
     }
@@ -296,80 +468,142 @@ export function InventoryApp() {
       return;
     }
 
-    const entry: LedgerEntry = {
-      id: `l-${Date.now()}`,
-      type: activeOperationType,
-      status: "Draft",
-      reference: `${refPrefix(activeOperationType)}-${Math.floor(1000 + Math.random() * 9000)}`,
-      productId: selectedProduct.id,
-      productName: selectedProduct.name,
-      category: selectedProduct.category,
-      warehouse: operationForm.warehouse,
-      location: activeOperationType === "Internal" ? operationForm.toLocation : operationForm.location,
-      quantity: operationForm.quantity,
-      timestamp: new Date().toISOString(),
-      notes: sanitizeText(operationForm.notes),
-      fromLocation: activeOperationType === "Internal" ? operationForm.fromLocation : undefined,
-      toLocation: activeOperationType === "Internal" ? operationForm.toLocation : undefined,
-    };
+    setIsSubmitting(true);
+    try {
+      let newEntry: any;
 
-    setLedger((current) => [entry, ...current]);
-    setBannerMessage(`${activeOperationType} ${entry.reference} created as Draft.`);
-    setOperationForm((current) => ({
-      ...current,
-      notes: "",
-      quantity: activeOperationType === "Adjustments" ? -1 : 1,
-    }));
+      if (activeOperationType === "Receipts") {
+        newEntry = await api.createSingleProductReceipt({
+          productId: selectedProduct.id,
+          quantity: operationForm.quantity,
+          warehouse: operationForm.warehouse,
+          location: operationForm.location,
+          notes: sanitizeText(operationForm.notes),
+        });
+        newEntry.type = "Receipts";
+      } else if (activeOperationType === "Delivery") {
+        newEntry = await api.createSingleProductDelivery({
+          productId: selectedProduct.id,
+          quantity: operationForm.quantity,
+          warehouse: operationForm.warehouse,
+          location: operationForm.location,
+          notes: sanitizeText(operationForm.notes),
+        });
+        newEntry.type = "Delivery";
+      } else if (activeOperationType === "Internal") {
+        newEntry = await api.createSingleProductTransfer({
+          productId: selectedProduct.id,
+          quantity: operationForm.quantity,
+          warehouse: operationForm.warehouse,
+          fromLocation: operationForm.fromLocation,
+          toLocation: operationForm.toLocation,
+          notes: sanitizeText(operationForm.notes),
+        });
+        newEntry.type = "Internal";
+      } else if (activeOperationType === "Adjustments") {
+        newEntry = await api.createAdjustment({
+          productId: selectedProduct.id,
+          quantity: operationForm.quantity,
+          warehouse: operationForm.warehouse,
+          location: operationForm.location,
+          notes: sanitizeText(operationForm.notes),
+        });
+        newEntry.type = "Adjustments";
+      }
+
+      // Add to ledger
+      const entry: LedgerEntry = {
+        id: newEntry.id,
+        type: newEntry.type,
+        status: newEntry.status || "Draft",
+        reference: newEntry.referenceNumber || `${newEntry.type}-${Date.now()}`,
+        productId: selectedProduct.id,
+        productName: selectedProduct.name,
+        category: selectedProduct.category,
+        warehouse: operationForm.warehouse,
+        location: activeOperationType === "Internal" ? operationForm.toLocation : operationForm.location,
+        quantity: operationForm.quantity,
+        timestamp: newEntry.createdAt || new Date().toISOString(),
+        notes: sanitizeText(operationForm.notes),
+        fromLocation: activeOperationType === "Internal" ? operationForm.fromLocation : undefined,
+        toLocation: activeOperationType === "Internal" ? operationForm.toLocation : undefined,
+      };
+
+      setLedger((current) => [entry, ...current]);
+      setBannerMessage(`${activeOperationType} ${entry.reference} created successfully.`);
+      setOperationForm((current) => ({
+        ...current,
+        notes: "",
+        quantity: activeOperationType === "Adjustments" ? -1 : 1,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create operation";
+      setBannerMessage(`Error: ${message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const validateOperation = (entryId: string) => {
+  const validateOperation = async (entryId: string) => {
     const target = ledger.find((entry) => entry.id === entryId);
 
     if (!target || target.status === "Done" || target.status === "Canceled") {
       return;
     }
 
-    const selectedProduct = products.find((product) => product.id === target.productId);
-    if (!selectedProduct) {
-      setBannerMessage("Product not found for this operation.");
-      return;
-    }
+    setIsSubmitting(true);
+    try {
+      let validationResult: any;
 
-    if (target.type === "Delivery") {
-      const currentStock = selectedProduct.stockByLocation[getLocationKey(target.warehouse, target.location)] ?? 0;
-      if (currentStock < target.quantity) {
-        setBannerMessage("Delivery validation failed: insufficient stock at selected location.");
-        return;
+      if (target.type === "Receipts") {
+        validationResult = await api.validateReceipt(entryId);
+      } else if (target.type === "Delivery") {
+        validationResult = await api.validateDelivery(entryId);
+      } else if (target.type === "Internal") {
+        validationResult = await api.validateTransfer(entryId);
+      } else if (target.type === "Adjustments") {
+        validationResult = await api.validateAdjustment(entryId);
       }
-    }
 
-    if (target.type === "Internal") {
-      const fromLocation = target.fromLocation ?? target.location;
-      const currentStock = selectedProduct.stockByLocation[getLocationKey(target.warehouse, fromLocation)] ?? 0;
-      if (currentStock < target.quantity) {
-        setBannerMessage("Transfer validation failed: insufficient stock at source location.");
-        return;
-      }
-    }
+      // Update ledger entry status
+      setLedger((current) =>
+        current.map((entry) =>
+          entry.id === entryId ? { ...entry, status: "Done" } : entry,
+        ),
+      );
 
-    setProducts((current) => applyValidatedLedgerEntry(current, target));
-    setLedger((current) => current.map((entry) => (entry.id === entryId ? { ...entry, status: "Done" } : entry)));
-    setBannerMessage(`Operation ${target.reference} validated. Stock ledger and quantities updated.`);
+      setBannerMessage(`Operation ${target.reference} validated successfully.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to validate operation";
+      setBannerMessage(`Error validating operation: ${message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const addWarehouse = () => {
+  const addWarehouse = async () => {
     const name = sanitizeText(warehouseNameInput);
     if (!isValidLabel(name) || warehouses.some((warehouse) => warehouse.name.toLowerCase() === name.toLowerCase())) {
       setBannerMessage("Warehouse name is invalid or already exists.");
       return;
     }
 
-    setWarehouses((current) => [...current, { id: `w-${Date.now()}`, name, locations: ["General"] }]);
-    setWarehouseNameInput("");
-    setBannerMessage(`Warehouse ${name} added.`);
+    setIsSubmitting(true);
+    try {
+      // TODO: Call API endpoint to create warehouse when available
+      // const result = await api.createWarehouse({ name });
+      setWarehouses((current) => [...current, { id: `w-${Date.now()}`, name, locations: ["General"] }]);
+      setWarehouseNameInput("");
+      setBannerMessage(`Warehouse ${name} added.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to add warehouse";
+      setBannerMessage(`Error: ${message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const addLocation = () => {
+  const addLocation = async () => {
     const location = sanitizeText(locationNameInput);
 
     if (!isValidLabel(location)) {
@@ -377,26 +611,32 @@ export function InventoryApp() {
       return;
     }
 
-    setWarehouses((current) =>
-      current.map((warehouse) =>
-        warehouse.name === locationWarehouseInput
-          ? {
-              ...warehouse,
-              locations: warehouse.locations.includes(location)
-                ? warehouse.locations
-                : [...warehouse.locations, location],
-            }
-          : warehouse,
-      ),
-    );
+    setIsSubmitting(true);
+    try {
+      // TODO: Call API endpoint to add location when available
+      // const result = await api.addLocationToWarehouse(locationWarehouseInput, { name: location });
+      setWarehouses((current) =>
+        current.map((warehouse) =>
+          warehouse.name === locationWarehouseInput
+            ? {
+                ...warehouse,
+                locations: warehouse.locations.includes(location)
+                  ? warehouse.locations
+                  : [...warehouse.locations, location],
+              }
+            : warehouse,
+        ),
+      );
 
-    setLocationNameInput("");
-    setBannerMessage(`Location ${location} added to ${locationWarehouseInput}.`);
+      setLocationNameInput("");
+      setBannerMessage(`Location ${location} added to ${locationWarehouseInput}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to add location";
+      setBannerMessage(`Error: ${message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
-
-  if (!isAuthenticated) {
-    return <AuthPanel onAuthenticated={authenticate} />;
-  }
 
   return (
     <div className="min-h-screen bg-zinc-100">
@@ -421,6 +661,18 @@ export function InventoryApp() {
           {bannerMessage && (
             <div className="mb-4 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700">
               {bannerMessage}
+            </div>
+          )}
+
+          {isLoadingData && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              Loading inventory data...
+            </div>
+          )}
+
+          {dataError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              Error: {dataError}
             </div>
           )}
 
@@ -533,25 +785,29 @@ export function InventoryApp() {
                     value={productForm.name}
                     onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))}
                     placeholder="Name"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                   />
                   <input
                     value={productForm.sku}
                     onChange={(event) => setProductForm((current) => ({ ...current, sku: event.target.value }))}
                     placeholder="SKU / Code"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                   />
                   <input
                     value={productForm.category}
                     onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))}
                     placeholder="Category"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                   />
                   <input
                     value={productForm.unit}
                     onChange={(event) => setProductForm((current) => ({ ...current, unit: event.target.value }))}
                     placeholder="Unit of measure"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <input
@@ -562,7 +818,8 @@ export function InventoryApp() {
                       type="number"
                       min={0}
                       placeholder="Reorder point"
-                      className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                      disabled={isSubmitting}
+                      className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                     />
                     <input
                       value={productForm.initialStock}
@@ -572,7 +829,8 @@ export function InventoryApp() {
                       type="number"
                       min={0}
                       placeholder="Initial stock"
-                      className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                      disabled={isSubmitting}
+                      className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                     />
                   </div>
 
@@ -587,7 +845,8 @@ export function InventoryApp() {
                         location: nextLocations[0] ?? "General",
                       }));
                     }}
-                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                   >
                     {warehouses.map((warehouse) => (
                       <option key={warehouse.id} value={warehouse.name}>
@@ -599,7 +858,8 @@ export function InventoryApp() {
                   <select
                     value={productForm.location}
                     onChange={(event) => setProductForm((current) => ({ ...current, location: event.target.value }))}
-                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                   >
                     {getWarehouseLocations(warehouses, productForm.warehouse).map((location) => (
                       <option key={location} value={location}>
@@ -611,9 +871,10 @@ export function InventoryApp() {
                   <button
                     type="button"
                     onClick={upsertProduct}
-                    className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                   >
-                    {productForm.id ? "Update product" : "Create product"}
+                    {isSubmitting ? "Saving..." : productForm.id ? "Update product" : "Create product"}
                   </button>
                 </div>
               </SectionCard>
@@ -686,7 +947,8 @@ export function InventoryApp() {
                     <select
                       value={operationForm.productId}
                       onChange={(event) => setOperationForm((current) => ({ ...current, productId: event.target.value }))}
-                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                      disabled={isSubmitting}
+                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                     >
                       <option value="">Select product</option>
                       {products.map((product) => (
@@ -711,7 +973,8 @@ export function InventoryApp() {
                           toLocation: locations[1] ?? firstLocation,
                         }));
                       }}
-                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                      disabled={isSubmitting}
+                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                     >
                       {warehouses.map((warehouse) => (
                         <option key={warehouse.id} value={warehouse.name}>
@@ -724,7 +987,8 @@ export function InventoryApp() {
                       <select
                         value={operationForm.location}
                         onChange={(event) => setOperationForm((current) => ({ ...current, location: event.target.value }))}
-                        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                        disabled={isSubmitting}
+                        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                       >
                         {operationLocations.map((location) => (
                           <option key={location} value={location}>
@@ -741,7 +1005,8 @@ export function InventoryApp() {
                           onChange={(event) =>
                             setOperationForm((current) => ({ ...current, fromLocation: event.target.value }))
                           }
-                          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                          disabled={isSubmitting}
+                          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                         >
                           {operationLocations.map((location) => (
                             <option key={location} value={location}>
@@ -754,7 +1019,8 @@ export function InventoryApp() {
                           onChange={(event) =>
                             setOperationForm((current) => ({ ...current, toLocation: event.target.value }))
                           }
-                          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                          disabled={isSubmitting}
+                          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                         >
                           {operationLocations.map((location) => (
                             <option key={location} value={location}>
@@ -772,7 +1038,8 @@ export function InventoryApp() {
                         setOperationForm((current) => ({ ...current, quantity: Number(event.target.value) || 0 }))
                       }
                       placeholder={activeOperationType === "Adjustments" ? "Adjustment qty (+/-)" : "Quantity"}
-                      className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                      disabled={isSubmitting}
+                      className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                     />
                     <textarea
                       value={operationForm.notes}
@@ -784,14 +1051,16 @@ export function InventoryApp() {
                             ? "Shipment / customer details"
                             : "Operation notes"
                       }
-                      className="min-h-24 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                      disabled={isSubmitting}
+                      className="min-h-24 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                     />
                     <button
                       type="button"
                       onClick={createOperation}
-                      className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+                      disabled={isSubmitting}
+                      className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                     >
-                      Create {activeOperationType}
+                      {isSubmitting ? "Creating..." : `Create ${activeOperationType}`}
                     </button>
                   </div>
                 </SectionCard>
@@ -830,11 +1099,11 @@ export function InventoryApp() {
                               <td className="py-2">
                                 <button
                                   type="button"
-                                  disabled={entry.status === "Done" || entry.status === "Canceled"}
+                                  disabled={entry.status === "Done" || entry.status === "Canceled" || isSubmitting}
                                   onClick={() => validateOperation(entry.id)}
-                                  className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 transition-opacity"
                                 >
-                                  Validate
+                                  {isSubmitting ? "Processing..." : "Validate"}
                                 </button>
                               </td>
                             </tr>
@@ -892,14 +1161,16 @@ export function InventoryApp() {
                     value={warehouseNameInput}
                     onChange={(event) => setWarehouseNameInput(event.target.value)}
                     placeholder="New warehouse name"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                   />
                   <button
                     type="button"
                     onClick={addWarehouse}
-                    className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                   >
-                    Add warehouse
+                    {isSubmitting ? "Processing..." : "Add warehouse"}
                   </button>
                 </div>
 
@@ -918,7 +1189,8 @@ export function InventoryApp() {
                   <select
                     value={locationWarehouseInput}
                     onChange={(event) => setLocationWarehouseInput(event.target.value)}
-                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
                   >
                     {warehouses.map((warehouse) => (
                       <option key={warehouse.id} value={warehouse.name}>
@@ -930,14 +1202,16 @@ export function InventoryApp() {
                     value={locationNameInput}
                     onChange={(event) => setLocationNameInput(event.target.value)}
                     placeholder="Location name"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-50"
                   />
                   <button
                     type="button"
                     onClick={addLocation}
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700"
+                    disabled={isSubmitting}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity hover:bg-zinc-50"
                   >
-                    Add location
+                    {isSubmitting ? "Processing..." : "Add location"}
                   </button>
                 </div>
 

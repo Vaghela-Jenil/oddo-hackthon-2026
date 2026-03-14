@@ -29,12 +29,15 @@ const signupController = async (req, res) => {
     const result = await signup(name, email, password);
 
     if (!result.success) {
+      console.log("Signup validation failed:", result);
       return res.status(400).json({ 
         error: result.error || "Signup failed",
-        errors: result.errors 
+        errors: result.errors,
+        details: "Password must contain: uppercase, lowercase, number, and special character (!@#$%^&*)"
       });
     }
 
+    console.log("✅ User signed up successfully:", result.user.email);
     res.status(201).json(result);
   } catch (error) {
     console.error("Signup error:", error);
@@ -49,21 +52,28 @@ const loginController = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    console.log("🔐 Login attempt:", email);
+
     // Validate inputs
     if (!email || !password) {
+      console.log("❌ Missing email or password");
       return res.status(400).json({ error: "Email and password are required" });
     }
 
     // Call login service
     const result = await login(email, password);
 
+    console.log("📊 Login result:", { success: result.success, error: result.error });
+
     if (!result.success) {
+      console.log("❌ Login failed:", result.error);
       return res.status(401).json({ error: result.error || "Login failed" });
     }
 
+    console.log("✅ Login successful for:", email);
     res.status(200).json(result);
   } catch (error) {
-    console.error("Login error:", error);
+    console.error("❌ Login error:", error);
     res.status(500).json({ error: error.message || "Internal server error" });
   }
 };
