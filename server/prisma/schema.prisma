@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MANAGER
+  STAFF
+}
+
+enum OpStatus {
+  DRAFT
+  WAITING
+  READY
+  DONE
+  CANCELED
+}
+
+enum MoveType {
+  RECEIPT
+  DELIVERY
+  TRANSFER
+  ADJUSTMENT
+}
+
+// ── Auth ──────────────────────────────────────────────
+model User {
+  id           String      @id @default(uuid())
+  name         String
+  email        String      @unique
+  passwordHash String
+  role         Role        @default(STAFF)
+  resetOtp     String?
+  otpExpiry    DateTime?
+  createdAt    DateTime    @default(now())
+  stockMoves   StockMove[]
+}
+
+// ── Warehouse & Location ──────────────────────────────
+model Warehouse {
+  id         String          @id @default(uuid())
+  name       String
+  address    String?
+  isActive   Boolean         @default(true)
+  locations  Location[]
+  receipts   Receipt[]
+  deliveries DeliveryOrder[]
+}
+
+model Location {
+  id             String         @id @default(uuid())
+  name           String
+  type           String?
+  warehouseId    String
+  warehouse      Warehouse      @relation(fields: [warehouseId], references: [id])
+  stockBalances  StockBalance[]
+  movesFrom      StockMove[]    @relation("MoveFrom")
+  movesTo        StockMove[]    @relation("MoveTo")
+  transfersFrom  Transfer[]     @relation("TxFrom")
+  transfersTo    Transfer[]     @relation("TxTo")
+  adjustments    Adjustment[]
+  receiptLines   ReceiptLine[]
+  deliveryLines  DeliveryLine[]
+}
+
+// ── Product ───────────────────────────────────────────
+model Category {
+  id       String     @id @default(uuid())
+  name     String
+  parentId String?
+  parent   Category?  @relation("CatTree", fields: [parentId], references: [id])
+  children Category[] @relation("CatTree")
+  products Product[]
+}
+
+model Product {
+  id              String           @id @default(uuid())
+  name            String
+  sku             String           @unique
+  categoryId      String
+  category        Category         @relation(fields: [categoryId], references: [id])
+  unitOfMeasure   String           @default("pcs")
+  lowStockQty     Decimal          @default(0)
+  imageUrl        String?
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  stockBalances   StockBalance[]
+  reorderRules    ReorderRule[]
+  stockMoves      StockMove[]
+  receiptLines    ReceiptLine[]
+  deliveryLines   DeliveryLine[]
+  transferLines   TransferLine[]
+  adjustmentLines AdjustmentLine[]
+
+  @@index([sku])
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+model StockBalance {
+  id         String   @id @default(uuid())
+  productId  String
+  locationId String
+  quantity   Decimal  @default(0)
+  product    Product  @relation(fields: [productId], references: [id])
+  location   Location @relation(fields: [locationId], references: [id])
+  updatedAt  DateTime @updatedAt
+
+  @@unique([productId, locationId])
+  @@index([productId])
+  @@index([locationId])
+}
+
+model ReorderRule {
+  id         String  @id @default(uuid())
+  productId  String
+  product    Product @relation(fields: [productId], references: [id])
+  minQty     Decimal
+  reorderQty Decimal
+}
+
+// ── Stock Ledger ──────────────────────────────────────
+model StockMove {
+  id             String    @id @default(uuid())
+  productId      String
+  product        Product   @relation(fields: [productId], references: [id])
+  qty            Decimal
+  type           MoveType
+  fromLocationId String?
+  fromLocation   Location? @relation("MoveFrom", fields: [fromLocationId], references: [id])
+  toLocationId   String?
+  toLocation     Location? @relation("MoveTo", fields: [toLocationId], references: [id])
+  referenceId    String?
+  refType        String?
+  note           String?
+  createdBy      String
+  createdByUser  User      @relation(fields: [createdBy], references: [id])
+  createdAt      DateTime  @default(now())
+
+  @@index([productId])
+  @@index([createdAt])
+  @@index([type])
+  @@index([referenceId])
+}
+
+// ── Receipts ──────────────────────────────────────────
+model Receipt {
+  id            String        @id @default(uuid())
+  refNo         String        @unique @default(cuid())
+  supplierId    String?
+  warehouseId   String
+  warehouse     Warehouse     @relation(fields: [warehouseId], references: [id])
+  status        OpStatus      @default(DRAFT)
+  scheduledDate DateTime?
+  lines         ReceiptLine[]
+  createdAt     DateTime      @default(now())
+
+  @@index([status])
+  @@index([warehouseId])
+}
+
+model ReceiptLine {
+  id          String   @id @default(uuid())
+  receiptId   String
+  receipt     Receipt  @relation(fields: [receiptId], references: [id])
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  locationId  String
+  location    Location @relation(fields: [locationId], references: [id])
+  expectedQty Decimal  @default(0)
+  receivedQty Decimal  @default(0)
+}
+
+// ── Deliveries ────────────────────────────────────────
+model DeliveryOrder {
+  id            String         @id @default(uuid())
+  refNo         String         @unique @default(cuid())
+  customerId    String?
+  warehouseId   String
+  warehouse     Warehouse      @relation(fields: [warehouseId], references: [id])
+  status        OpStatus       @default(DRAFT)
+  scheduledDate DateTime?
+  lines         DeliveryLine[]
+  createdAt     DateTime       @default(now())
+
+  @@index([status])
+  @@index([warehouseId])
+}
+
+model DeliveryLine {
+  id         String        @id @default(uuid())
+  deliveryId String
+  delivery   DeliveryOrder @relation(fields: [deliveryId], references: [id])
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id])
+  locationId String
+  location   Location      @relation(fields: [locationId], references: [id])
+  qty        Decimal
+}
+
+// ── Transfers ─────────────────────────────────────────
+model Transfer {
+  id             String         @id @default(uuid())
+  refNo          String         @unique @default(cuid())
+  fromLocationId String
+  fromLocation   Location       @relation("TxFrom", fields: [fromLocationId], references: [id])
+  toLocationId   String
+  toLocation     Location       @relation("TxTo", fields: [toLocationId], references: [id])
+  status         OpStatus       @default(DRAFT)
+  scheduledDate  DateTime?
+  lines          TransferLine[]
+  createdAt      DateTime       @default(now())
+
+  @@index([status])
+}
+
+model TransferLine {
+  id         String   @id @default(uuid())
+  transferId String
+  transfer   Transfer @relation(fields: [transferId], references: [id])
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  qty        Decimal
+}
+
+// ── Adjustments ───────────────────────────────────────
+model Adjustment {
+  id         String           @id @default(uuid())
+  refNo      String           @unique @default(cuid())
+  locationId String
+  location   Location         @relation(fields: [locationId], references: [id])
+  status     OpStatus         @default(DRAFT)
+  reason     String?
+  lines      AdjustmentLine[]
+  createdAt  DateTime         @default(now())
+
+  @@index([status])
+}
+
+model AdjustmentLine {
+  id           String     @id @default(uuid())
+  adjustmentId String
+  adjustment   Adjustment @relation(fields: [adjustmentId], references: [id])
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  systemQty    Decimal
+  countedQty   Decimal
+  difference   Decimal
+}
